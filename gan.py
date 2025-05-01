@@ -3,11 +3,9 @@ import math
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
 
-# We will be using ADFA-LD dataset later on
 class GAN(pl.LightningModule):
     def __init__(
         self,
@@ -193,76 +191,6 @@ class GANDataset(torch.utils.data.Dataset):
 # Our Malware Classifier using Convolutional Neural Networks
 
 
-class MalwareClassifier(pl.LightningModule):
-    def __init__(
-        self,
-        vocab_size: int,
-        embed_dim: int = 128,
-        num_classes: int = 10,
-        num_filters: int = 128,
-        kernel_size: int = 5,
-        hidden_dim: int = 256,
-        lr: float = 1e-3,
-        max_steps: int = 1000,
-    ):
-        super().__init__()
-        self.save_hyperparameters()
-
-        # Layers
-        self.embedding = nn.Embedding(self.hparams.vocab_size, self.hparams.embed_dim)
-        self.conv1d = nn.Conv1d(
-            in_channels=self.hparams.embed_dim,
-            out_channels=self.hparams.num_filters,
-            kernel_size=self.hparams.kernel_size,
-            padding=self.hparams.kernel_size // 2,  # keep same length
-        )
-        self.fc1 = nn.Linear(self.hparams.num_filters, self.hparams.hidden_dim)
-        self.fc2 = nn.Linear(self.hparams.hidden_dim, self.hparams.num_classes)
-
-    def forward(self, x):
-        """
-        x: (batch_size, seq_len)
-        """
-        x = self.embedding(x)  # (batch_size, seq_len, embed_dim)
-        x = x.permute(0, 2, 1)  # (batch_size, embed_dim, seq_len) for Conv1d
-        x = F.relu(self.conv1d(x))  # (batch_size, num_filters, seq_len)
-        x = F.adaptive_max_pool1d(x, 1).squeeze(-1)  # (batch_size, num_filters)
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x
-
-    def training_step(self, batch, batch_idx):
-        x, y = batch
-        logits = self.forward(x)
-        loss = F.cross_entropy(logits, y)
-        self.log("train_loss", loss, on_step=True, prog_bar=True)
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        x, y = batch
-        logits = self.forward(x)
-        loss = F.cross_entropy(logits, y)
-        preds = torch.argmax(logits, dim=1)
-        acc = (preds == y).float().mean()
-        self.log("val_loss", loss, prog_bar=True)
-        self.log("val_acc", acc, prog_bar=True)
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
-        scheduler = {
-            "scheduler": torch.optim.lr_scheduler.OneCycleLR(
-                optimizer,
-                max_lr=self.hparams.lr,
-                total_steps=self.hparams.max_steps,
-                pct_start=0.1,
-                anneal_strategy="linear",
-                final_div_factor=10,
-            ),
-            "interval": "step",
-        }
-        return {"optimizer": optimizer, "lr_scheduler": scheduler}
-
-
 if __name__ == "__main__":
 
     # Dummy dataset
@@ -286,17 +214,6 @@ if __name__ == "__main__":
     data_onehot = nn.functional.one_hot(
         data, num_classes=vocab_size
     ).float()  # feature represetation
-
-    # three classes: cat (0), dog (1), horse (2):
-
-    # d = ["cat", "horse", "dog"]
-
-    # d_one_hot  = [
-
-    #     [1, 0, 0],
-    #     [0, 0, 1],
-    #     [0, 1, 0]
-    # ]
 
     dataset = TensorDataset(data_onehot)
     dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
@@ -330,53 +247,11 @@ if __name__ == "__main__":
     # # # Save discriminator model
     torch.save(gan.D.state_dict(), "discriminator.pt")
 
-    # # check BCELoss and CELoss are the same
-    # criterion = nn.BCELoss()
-    # real_labels = torch.ones(batch_size)
-    # fake_labels = torch.zeros(batch_size)
-    # real_loss = criterion(torch.ones_like(real_labels), real_labels)
-    # fake_loss = criterion(torch.zeros_like(fake_labels), fake_labels)
-    # print(real_loss == fake_loss)
-
 
 # train CNN model
 
 
 # Dummy data
-x = torch.randint(0, 100, (200, 50))  # (batch_size, seq_len)
-y = torch.randint(0, 2, (200,))  # (batch_size,) # 0 or  1
-dataset = TensorDataset(x, y)
-
-train_loader = DataLoader(dataset, batch_size=64, shuffle=True)
-val_loader = DataLoader(dataset, batch_size=64)
-
-classifier_max_steps = 15
-model = MalwareClassifier(
-    vocab_size=100,
-    embed_dim=128,
-    num_classes=2,
-    lr=1e-3,
-    max_steps=classifier_max_steps,
-)
-
-trainer = pl.Trainer(
-    max_steps=classifier_max_steps,
-    val_check_interval=4,  # validate every 200 steps
-    log_every_n_steps=10,
-    accelerator="auto",
-    devices="auto",
-)
-
-trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
-
-
-# Your Next steps:
-# Step 0: Read ADFA -LD dataset: use the file_reader.py file
-# 1)  We have train our GAN on the ADFA-LD dataset
-
-# 2) Once we trained our GAN, we have generate fake samples ( 500 samples of sequences)
-
-
-# 3 ) Evaluate your Malware Classifier on ADFA-LD before balancing dataset
-
-# 4) Then, also evaluatee Malware Classifier after balancing ( add fake samples of malware with our original training datasets from the ADFA dataset)
+# x = torch.randint(0, 100, (200, 50))  # (batch_size, seq_len)
+# y = torch.randint(0, 2, (200,))  # (batch_size,) # 0 or  1
+# dataset = TensorDataset(x, y)

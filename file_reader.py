@@ -2,209 +2,243 @@ import argparse
 import glob
 import json
 import os
+import re
 from typing import List, Tuple
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
 
-def read_sequences_from_file(file_path):
-    with open(file_path, "r", encoding="utf-8", errors="ignore") as file:
-        sequence = [int(num) for num in file.read().strip().split()]
-    return sequence
+class FileReader:
 
+    def __init__(
+        self,
+    ):
+        pass
+        # self.tokenizer = tokenizer
+        # self.label_encoder = label_encoder
 
-def read_sequences_from_folder(folder_path):
-    sequences = []
-    for file_path in glob.glob(os.path.join(folder_path, "*.txt")):
-        if not os.path.basename(file_path).startswith("._"):
-            sequences.append(read_sequences_from_file(file_path))
-    return sequences
+    def _read_sequences_from_file(self, file_path):
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as file:
+            sequence = [int(num) for num in file.read().strip().split()]
+        return sequence
 
+    def _read_sequences_from_folder(self, folder_path):
+        sequences = []
+        for file_path in glob.glob(os.path.join(folder_path, "*.txt")):
+            if not os.path.basename(file_path).startswith("._"):
+                sequences.append(self._read_sequences_from_file(file_path))
+        return sequences
 
-def read_sequences_from_folder_with_subfolders(folder_path):
-    sequences = []
-    for root, _, files in os.walk(folder_path):
-        for file in files:
-            if file.endswith(".txt"):
-                file_path = os.path.join(root, file)
-                sequences.append(read_sequences_from_file(file_path))
+    def _read_sequences_from_folder_with_subfolders(self, folder_path):
+        sequences = []
+        for root, _, files in os.walk(folder_path):
+            for file in files:
+                if file.endswith(".txt"):
+                    file_path = os.path.join(root, file)
+                    sequences.append(self._read_sequences_from_file(file_path))
 
-    return sequences
+        return sequences
 
+    def read_all_sequences(self, dataset_folder, dataset_name):
 
-def read_all_sequences(dataset_folder, dataset_name):
+        dataset_folder = os.path.join(os.getcwd(), dataset_folder, dataset_name)
 
-    dataset_folder = os.path.join(os.getcwd(), dataset_folder, dataset_name)
+        print("dataset folder path = ", dataset_folder)
 
-    print("dataset folder path = ", dataset_folder)
+        path_sub_folders = [
+            os.path.join(dataset_folder, sub_folder)
+            for sub_folder in os.listdir(dataset_folder)
+            if os.path.isdir(os.path.join(dataset_folder, sub_folder))
+        ]
 
-    path_sub_folders = [
-        os.path.join(dataset_folder, sub_folder)
-        for sub_folder in os.listdir(dataset_folder)
-        if os.path.isdir(os.path.join(dataset_folder, sub_folder))
-    ]
+        print("sub folders :", path_sub_folders)
+        sequences = []
+        labels = []
+        for folder_path in path_sub_folders:
+            if "Attack" in folder_path:
+                data = self._read_sequences_from_folder_with_subfolders(folder_path)
+                sequences.extend(data)
+                labels.extend(["malware"] * len(data))
 
-    print("sub folders :", path_sub_folders)
-    sequences = []
-    labels = []
-    for folder_path in path_sub_folders:
-        if "Attack" in folder_path:
-            data = read_sequences_from_folder_with_subfolders(folder_path)
-            sequences.extend(data)
-            labels.extend(["malware"] * len(data))
+            else:
+                data = self._read_sequences_from_folder(folder_path)
+                sequences.extend(data)
+                labels.extend(["normal"] * len(data))
+        return sequences, labels
 
-        else:
-            data = read_sequences_from_folder(folder_path)
-            sequences.extend(data)
-            labels.extend(["normal"] * len(data))
-    return sequences, labels
+    def encode_sequences(self, sequences, vocabs):
+        """
+        Encodes a list of sequences using a given vocabulary.
 
+        Args:
+        sequences (list of list of integers): The sequences to encode.
+        vocabs (dict): A dictionary mapping each element to an index.
 
-def save_sequence_data(sequences, labels, output_file_path):
-    # Serialize all sequence data and vocabulary to a single file
+        Returns:
+        list of list of int: The encoded sequences.
+        """
+        encoded_data = []
+        # Define an index for unknown elements, default to -1 if not provided
+        unk_index = vocabs.get("UNK", -1)
 
-    # check if folder exists, else create new folder
-    data_dir = os.path.join(os.getcwd(), "data")
-    print("data dir path = ", data_dir)
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
-        print(f"Create directory: {data_dir}")
+        for sequence in sequences:
+            encoded_sequence = [
+                vocabs.get(str(element), unk_index) for element in sequence
+            ]
+            encoded_data.append(encoded_sequence)
 
-    with open(output_file_path, "w") as f:
-        data_to_save = {
-            "sequence_data": sequences,
-            # 'vocab_size': len(encoder.syscall_vocabs),
-            # 'vocab': encoder.syscall_vocabs,
-            "labels": labels,
-            # 'vocab': syscall_vocab,
-        }
+        return encoded_data
 
-        # check if file alreay exists in a folder
-        if os.path.exists(output_file_path):
-            print(f"File {output_file_path} already exists. Overwriting...")
+    def load_and_print_dataset(self, file_path, print_data: bool = False):
+        with open(file_path, "r") as f:
+            loaded_data = json.load(f)
 
-        else:
-            print(f"File {output_file_path} does not exist. Creating new file")
-        with open(output_file_path, "w") as f:
-            json.dump(data_to_save, f)
+        sequences = [item["sequence_data"] for item in loaded_data]
+        labels = [item["label"] for item in loaded_data]
 
-    return output_file_path
+        if print_data:
+            for idx, (sequence, label) in enumerate(zip(sequences, labels)):
+                print(f"Sequence: {sequence}\nLabel: {label}\n")
 
+        return sequences, labels
 
-def encode_sequences(sequences, vocabs):
-    """
-    Encodes a list of sequences using a given vocabulary.
+    def read_malapi_2019(
+        api_data_path: str, labels_path: str
+    ) -> Tuple[List[List[str]], pd.DataFrame]:
+        with open(api_data_path, "r") as file:
+            lines = file.readlines()
+            data = [line.strip().split(" ") for line in lines]
 
-    Args:
-    sequences (list of list of integers): The sequences to encode.
-    vocabs (dict): A dictionary mapping each element to an index.
+        with open(labels_path, "r") as f:
+            lines = f.readlines()
+            labels = [line.strip() for line in lines if line.strip()]
 
-    Returns:
-    list of list of int: The encoded sequences.
-    """
-    encoded_data = []
-    # Define an index for unknown elements, default to -1 if not provided
-    unk_index = vocabs.get("UNK", -1)
+        return data, labels
 
-    for sequence in sequences:
-        encoded_sequence = [vocabs.get(str(element), unk_index) for element in sequence]
-        encoded_data.append(encoded_sequence)
+    def preprocess_data(
+        dataset_name: str,
+        call_data: List[List[str]],
+        labels: List,
+        vocab_path="vocabs.json",
+        train_path="train_dataset.json",
+        test_path="test_dataset.json",
+        test_size=0.2,
+        random_seed=42,
+    ):
 
-    return encoded_data
+        # create full path to save vocabs, train and test data
+        train_path = f"dataset/{dataset_name}/{train_path}"
+        test_path = f"dataset/{dataset_name}/{test_path}"
 
+        vocab_path = (
+            "syscall_" + vocab_path
+            if dataset_name == "ADFA"
+            else "apicall_" + vocab_path
+        )
 
-def load_and_print_dataset(file_path, print_data: bool = False):
-    with open(file_path, "r") as f:
-        loaded_data = json.load(f)
+        vocab_path = f"dataset/{dataset_name}/{vocab_path}"
+        # Create vocabulary
+        all_calls = sorted(set(call for sequence in call_data for call in sequence))
+        call_vocab = {call: idx for idx, call in enumerate(all_calls)}
 
-    sequences = loaded_data["sequence_data"]
-    labels = loaded_data["labels"]
-    # vocab_size = loaded_data['vocab_size']
-    # syscall_vocab = loaded_data['vocab']
-    # max_seq_len = loaded_data['max_seq_len']
-    if print_data:
-        for idx, (sequence, label) in enumerate(zip(sequences, labels)):
-            print(f"Sequence: {sequence}\nLabel: {label}\n")
-        # print(f"Vocabulary Size: {vocab_size}")
-        # print('Vocab: ', syscall_vocab)
-        # print(f"Max Length: {max_seq_len}")
+        # Save vocabulary
+        with open(vocab_path, "w") as f:
+            json.dump(call_vocab, f)
 
-    return sequences, labels
+        # Merge API calls and labels
+        combined = [
+            {"sequence_data": seq, "label": label}
+            for seq, label in zip(call_data, labels)
+        ]
 
+        # Split dataset
+        train_data, test_data = train_test_split(
+            combined,
+            test_size=test_size,
+            random_state=random_seed,
+            stratify=labels,
+        )
 
-def read_malapi_2019(
-    api_data_path: str, labels_path: str
-) -> Tuple[List[List[str]], pd.DataFrame]:
-    with open(api_data_path, "r") as file:
-        lines = file.readlines()
-        data = [line.strip().split(" ") for line in lines]
+        # Save datasets
+        with open(train_path, "w") as f:
+            json.dump(train_data, f)
 
-    with open(labels_path, "r") as f:
-        lines = f.readlines()
-        labels = [line.strip() for line in lines if line.strip()]
+        with open(test_path, "w") as f:
+            json.dump(test_data, f)
 
-    return data, labels
+        print(f"Saved {len(train_data)} training and {len(test_data)} testing samples.")
 
+    def load_json_data(self, file_path):
 
-def preprocess_data(
-    dataset_name: str,
-    call_data: List[List[str]],
-    labels: List,
-    vocab_path="vocabs.json",
-    train_path="train_dataset.json",
-    test_path="test_dataset.json",
-    test_size=0.2,
-    random_seed=42,
-):
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File {file_path} does not exist.")
 
-    # create full path to save vocabs, train and test data
-    train_path = f"dataset/{dataset_name}/{train_path}"
-    test_path = f"dataset/{dataset_name}/{test_path}"
+        with open(file_path, "r") as f:
+            self.data = json.load(f)
 
-    vocab_path = (
-        "syscall_" + vocab_path if dataset_name == "adfa" else "apicall_" + vocab_path
-    )
+            sequences = [item["sequence_data"] for item in self.data]
+            labels = []
 
-    vocab_path = f"dataset/{dataset_name}/{vocab_path}"
-    # Create vocabulary
-    all_calls = sorted(set(call for sequence in call_data for call in sequence))
-    call_vocab = {call: idx for idx, call in enumerate(all_calls)}
+            # assert len(sequences) == len(
+            #     labels
+            # ), "There is sanity issue with your data."
 
-    # Save vocabulary
-    with open(vocab_path, "w") as f:
-        json.dump(call_vocab, f)
+            for idx, item in enumerate(self.data):
+                label = item["label"]
+                # print(idx, "label = ", label)
+                assert len(label) > 0, f"Empty label encountered for a sequence = {idx}"
+                labels.append(label)
 
-    # Merge API calls and labels
-    combined = [
-        {"sequence_data": seq, "label": label} for seq, label in zip(call_data, labels)
-    ]
+        return sequences, labels
 
-    # Split dataset
-    train_data, test_data = train_test_split(
-        combined,
-        test_size=test_size,
-        random_state=random_seed,
-        stratify=labels,
-    )
+    def encoded_data(self, tokenizer=None, label_encoder=None):
+        return [
+            tokenizer(element) for sequence in self.sequences for element in sequence
+        ]
 
-    # Save datasets
-    with open(train_path, "w") as f:
-        json.dump(train_data, f)
+        self.labels  # labels are unencoded
 
-    with open(test_path, "w") as f:
-        json.dump(test_data, f)
+        # return encode_sequences(self.sequences, data_tokenizer), self.labels
 
-    print(
-        f"Saved {len(train_data)} training samples and {len(test_data)} testing samples."
-    )
+    def get_decoded_data(self):
+        return self.decode_data(self.sequences)
 
+    def decode_data(self, sequences, data_tokenizer=None):
+        """The dataset are in integers, decode them back to system calls"""
+        decoded_data = []
+        for sequence in sequences:
+            decoded_sequence = [self.data.get(str(element), -1) for element in sequence]
+            decoded_data.append(decoded_sequence)
+        return decoded_data
 
-def fetch_graphs(encoder, sequences, labels):
-    graphs = []
-    for sequence, label in zip(sequences, labels):
-        graphs.append(encoder.sequence_to_graph(sequence, label))
-    return graphs
+    @staticmethod
+    def extract_syscalls(filename):
+        """
+        Extracts system call names and numbers from a file.
+
+        Args:
+            filename (str): The name of the file to extract from.
+
+        Returns:
+            dict: A dictionary where keys are syscall names and values are syscall numbers.
+        """
+
+        syscalls_table = {}
+        with open(filename, "r") as f:
+            for line in f:
+                # Extract syscall number and name using regex
+                match = re.search(r"#define\s+__NR_(\w+)\s+(\d+)", line)
+                if match:
+                    syscall_name = match.group(1)
+                    syscall_number = int(match.group(2))
+                    syscalls_table[syscall_name] = syscall_number
+        return syscalls_table
+
+    # 25, 43 - 46, 62, 71, 79 -80, 222 - 223, 245 - 259, 265 - 1023, 1038 - 1039, ...
+
+    # Example: Accessing a specific syscall number
+    # print(f"\nThe syscall number for 'read' is: {syscall_dict['read']}")
 
 
 if __name__ == "__main__":
@@ -224,15 +258,30 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_name", type=str, default="ADFA", choices=["ADFA"])
     args = parser.parse_args()
 
+    reader = FileReader()
+
     if args.dataset_name == "ADFA":  # handle ADFA-LD dataset here
-        sequences, labels = read_all_sequences(
+        sequences, labels = reader.read_all_sequences(
             args.dataset_folder, dataset_name=args.dataset_name
         )
 
         # save train and test data
-        preprocess_data(
+        reader.preprocess_data(
             dataset_name=args.dataset_name, call_data=sequences, labels=labels
         )
 
     else:
         raise ValueError(f"Unknown dataset name: {args.dataset_name}")
+
+    # map system calls
+
+    vocab_path = os.path.join(
+        os.getcwd(), args.dataset_folder, args.dataset_name, "ADFA-LD+Syscall+List.txt"
+    )
+    # reader = LoadJsonFromFile(vocab_path).encoded_data()
+
+    syscalls = reader.extract_syscalls(vocab_path)
+
+    print(sorted(syscalls.items(), key=lambda x: x[1]))
+
+    print(len(syscalls))
