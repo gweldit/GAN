@@ -19,8 +19,8 @@ class MalwareClassifier(pl.LightningModule):
         num_filters: int = 128,
         kernel_size: int = 5,
         hidden_dim: int = 256,
-        lr: float = 1e-3,
-        max_steps: int = 1000,
+        lr: float = 0.001,
+        max_steps: int = 100,
     ):
         super().__init__()
         # self.save_hyperparameters()
@@ -113,7 +113,7 @@ class MalwareClassifier(pl.LightningModule):
                 max_lr=self.lr,
                 total_steps=self.max_steps,
                 pct_start=0.3,
-                anneal_strategy="linear",
+                anneal_strategy="cos",
                 final_div_factor=100,
             ),
             "interval": "step",
@@ -157,7 +157,7 @@ if __name__ == "__main__":
     # print(train_dataset.tokenizer.n_tokens())
     model_1 = MalwareClassifier(
         vocab_size=train_dataset.tokenizer.n_tokens(),
-        embed_dim=256,
+        embed_dim=128,
         num_classes=len(train_dataset.label_encoder.classes_),
         lr=1e-3,
         max_steps=classifier_max_steps,
@@ -171,6 +171,7 @@ if __name__ == "__main__":
         accelerator="auto",
         devices="auto",
         callbacks=[RichProgressBar()],  # show step progress
+        enable_progress_bar=True,
     )
 
     trainer.fit(model_1, train_dataloaders=train_loader, val_dataloaders=val_loader)
@@ -184,20 +185,4 @@ if __name__ == "__main__":
     # 3 ) Evaluate your Malware Classifier on ADFA-LD before balancing dataset
 
     # 4) Then, load generator model and generate fake samples of malware. Then, we evaluate Malware Classifier after balancing ( add fake samples of malware with our original training datasets from the ADFA dataset)
-    # model_2 = MalwareClassifier(
-    #     vocab_size=train_dataset.tokenizer.n_tokens(),
-    #     embed_dim=128,
-    #     num_classes=len(train_dataset.label_encoder.classes_),
-    #     lr=1e-3,
-    #     max_steps=classifier_max_steps,
-    # )
-
-    # trainer = pl.Trainer(
-    #     max_steps=classifier_max_steps,
-    #     val_check_interval=10,  # validate every 200 steps
-    #     log_every_n_steps=10,
-    #     accelerator="auto",
-    #     devices="auto",
-    # )
-
-    # trainer.fit(model_2, train_dataloaders=train_loader, val_dataloaders=val_loader)
+    # model2 = MalwareClassifier(...)
