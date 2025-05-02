@@ -3,11 +3,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_lightning.callbacks import RichProgressBar
+from pytorch_lightning.loggers import TensorBoardLogger
 from sklearn.metrics import f1_score
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import DataLoader
 
 from custom_dataset import CustomDataset, Tokenizer, custom_collate_fn
+
+logger = TensorBoardLogger("lightning_logs", name="classifier")
 
 
 class MalwareClassifier(pl.LightningModule):
@@ -21,6 +24,7 @@ class MalwareClassifier(pl.LightningModule):
         hidden_dim: int = 256,
         lr: float = 0.001,
         max_steps: int = 100,
+        dp_rate=0.5,
     ):
         super().__init__()
         # self.save_hyperparameters()
@@ -28,6 +32,7 @@ class MalwareClassifier(pl.LightningModule):
         # Layers
         self.lr = lr
         self.max_steps = max_steps
+        self.dropout = nn.Dropout(dp_rate)
 
         self.embedding = nn.Embedding(vocab_size, embed_dim).to(self.device)
 
@@ -47,6 +52,19 @@ class MalwareClassifier(pl.LightningModule):
         self.fc1 = nn.Linear(num_filters, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, num_classes)
 
+    # def forward(self, x):
+    #     """
+    #     x: (batch_size, seq_len)
+    #     """
+    #     x = self.embedding(x)  # (B, L, E)
+    #     x = x.permute(0, 2, 1)  # (B, E, L)
+    #     x = F.relu(self.conv1(x))  # (B, F, L)
+    #     x = F.relu(self.conv2(x))  # (B, F, L)
+    #     x = F.adaptive_max_pool1d(x, 1).squeeze(-1)  # (B, F)
+    #     x = F.relu(self.fc1(x))  # (B, H)
+    #     x = self.fc2(x)  # (B, C)
+    #     return x
+
     def forward(self, x):
         """
         x: (batch_size, seq_len)
@@ -56,11 +74,14 @@ class MalwareClassifier(pl.LightningModule):
         x = F.relu(self.conv1(x))  # (B, F, L)
         x = F.relu(self.conv2(x))  # (B, F, L)
         x = F.adaptive_max_pool1d(x, 1).squeeze(-1)  # (B, F)
+        x = self.dropout(x)  # dropout after pooling
         x = F.relu(self.fc1(x))  # (B, H)
+        x = self.dropout(x)  # dropout after fc1
         x = self.fc2(x)  # (B, C)
         return x
 
     def training_step(self, batch, batch_idx):
+        self.train()
         x, y = batch
         # print(self.device)
         x = x.long()
@@ -87,6 +108,7 @@ class MalwareClassifier(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         # print(batch[0])
+        self.eval()
         x, y = batch
         logits = self.forward(x)
         loss = F.cross_entropy(logits, y)
@@ -152,12 +174,12 @@ if __name__ == "__main__":
     # initialize the model
     # print(train_dataset[10])
 
-    classifier_max_steps = 250
+    classifier_max_steps = 1000
 
     # print(train_dataset.tokenizer.n_tokens())
     model_1 = MalwareClassifier(
         vocab_size=train_dataset.tokenizer.n_tokens(),
-        embed_dim=128,
+        embed_dim=64,
         num_classes=len(train_dataset.label_encoder.classes_),
         lr=1e-3,
         max_steps=classifier_max_steps,
@@ -165,13 +187,15 @@ if __name__ == "__main__":
 
     trainer = pl.Trainer(
         # max_epochs=-1,
+        # max_epochs=classifier_max_steps,
         max_steps=classifier_max_steps,
-        val_check_interval=10,  # validate every 10 steps
-        log_every_n_steps=10,
+        val_check_interval=5,  # validate every 10 steps
+        log_every_n_steps=5,
         accelerator="auto",
         devices="auto",
         callbacks=[RichProgressBar()],  # show step progress
         enable_progress_bar=True,
+        logger=logger,
     )
 
     trainer.fit(model_1, train_dataloaders=train_loader, val_dataloaders=val_loader)

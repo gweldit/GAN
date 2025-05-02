@@ -105,7 +105,7 @@ class CustomDataset(torch.utils.data.Dataset):
         return torch.tensor(self.sequences[idx], dtype=torch.long), self.labels[idx]
 
 
-def custom_collate_fn(batch, seq_len=120, pad_value=0):
+def custom_collate_fn(batch, seq_len=150, pad_value=0):
     sequences = []
     labels = []
 
